@@ -1,0 +1,21 @@
+name: meridian-payments
+seed: 20261020
+rows: 50000000
+batch_size: 250000
+output_dir: data
+start_date: '2026-09-01'
+days: 60
+customers: 1000000
+merchants: 150000
+processors: 8
+incident:
+  enabled: true
+  start_date: '2026-10-09'
+  end_date: '2026-10-30'
+  processor_id: 3
+  card_network: Mastercard
+  channel: ecommerce
+  cross_border: true
+  mcc: '4722'
+  baseline_decline_rate: 0.035
+  injected_decline_rate: 0.24
