@@ -16,7 +16,9 @@ def write_table(path, name, rows):
     temporary = path.with_suffix('.tmp')
     pq.write_table(data, temporary, compression='zstd')
     os.replace(temporary, path)
-    return data.num_rows
+    written = pq.read_metadata(path).num_rows
+    if written != data.num_rows: raise ValueError('Written Parquet row count mismatch')
+    return written
 
 
 def write_json(path, value):

@@ -36,7 +36,7 @@ obtained by joining merchants, not by adding redundant fact columns. All termina
 references belong to the referenced merchant. Customer country determines issuing
 country; merchant country determines transaction country and currency. Reference
 entities precede transaction dates. Rule windows are half-open, deployments
-complete at rule activation, and old/new rules coexist during 80% rollout.
+complete at rule activation, and old/new rules coexist during canary and expanded rollout, followed by recovery.
 `ALL` is our documented wildcard convention for unrestricted rule predicates;
 the DDL itself does not specify enum constraints. Currency/country codes are ISO
 style. Routing `currency_conversion_required=False` means no routing requirement,

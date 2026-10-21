@@ -1,0 +1,14 @@
+# Isolate test state/output from ordinary docker-compose.yaml deployment data.
+services:
+  generator:
+    volumes:
+      - smoke_state:/state
+      - ./data/m3-smoke/public:/app/data/public
+  worker:
+    volumes:
+      - smoke_state:/state
+      - ./data/m3-smoke/public:/app/data/public
+      - ./data/m3-smoke/private:/private
+
+volumes:
+  smoke_state:

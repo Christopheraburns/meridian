@@ -1,52 +1,119 @@
-"""Small single-user control plane for local Docker and Cloudera AI Workbench."""
+"""Flask control plane. All generation and dataset validation run in worker.py."""
+import json
+from pathlib import Path
 import os
 import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-import threading
-from flask import Flask, jsonify, request, render_template_string
-from meridian.generator import config_load, generate
-from meridian.config import Config
+sys.path.insert(0,str(Path(__file__).resolve().parent/'src'))
+from flask import Flask, jsonify, request, render_template
+from werkzeug.exceptions import BadRequest
+from meridian.config import Config, config_load
+from meridian.jobs import Settings
+from meridian.registry import Registry, Conflict, public_run
+from meridian.security import identity
+from meridian.preflight import inspect
 
-app=Flask(__name__)
-STATE={'status':'idle','generated':0,'target':0,'error':None,'stats':None}
-LOCK=threading.Lock()
-CONFIG=os.getenv('GENERATOR_CONFIG','config/default.yaml')
-OUTPUT=os.getenv('GENERATOR_OUTPUT','data')
-HTML='''<!doctype html><html><head><title>Meridian Financial Data Generator</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font:16px system-ui;max-width:850px;margin:60px auto;padding:0 20px;color:#122237}button{background:#174f87;color:white;border:0;padding:13px 18px;border-radius:6px;cursor:pointer}pre{background:#f1f5f9;padding:20px;overflow:auto}h1{color:#174f87}</style></head><body><h1>Meridian Financial Data Generator</h1><p>Portable, deterministic synthetic payments with planted payment-routing incident.</p><p><b>Configuration:</b> {{config}}</p><button onclick="fetch('/api/start',{method:'POST'}).then(r=>r.json()).then(x=>alert(JSON.stringify(x)))">Start generation</button><h2>Job status</h2><pre id="state">Loading...</pre><script>async function refresh(){let r=await fetch('/api/status');document.getElementById('state').textContent=JSON.stringify(await r.json(),null,2)}refresh();setInterval(refresh,2500)</script></body></html>'''
 
-@app.get('/')
-def index(): return render_template_string(HTML,config=CONFIG)
+def create_app(settings=None):
+    settings = settings or Settings.environment()
+    settings.validate()
+    app = Flask(__name__,template_folder='src/meridian/web/templates')
+    app.config['MAX_CONTENT_LENGTH'] = 64*1024
 
-@app.get('/health')
-def health(): return jsonify(ok=True)
+    def registry(): return Registry(settings.state)
 
-@app.get('/api/status')
-def status():
-    with LOCK: return jsonify(dict(STATE))
+    @app.before_request
+    def authorize():
+        if not request.path.startswith('/api/'): return None
+        role = identity(request.headers.get('Authorization',''),settings.state)
+        if role is None: return jsonify(error='Bearer token required'),401
+        operator_only = request.method!='GET' or request.path.startswith('/api/config')
+        if operator_only and role!='operator': return jsonify(error='Operator access required'),403
+        if request.method!='GET' and request.headers.get('Origin'):
+            if request.headers['Origin'].rstrip('/') != (os.getenv('GENERATOR_PUBLIC_ORIGIN') or request.host_url).rstrip('/'):
+                return jsonify(error='Cross-origin changes are not allowed'),403
 
-def runner(cfg):
-    try:
-        def progress(done,total):
-            with LOCK: STATE.update(generated=done,target=total)
-        stats=generate(cfg,output=OUTPUT,progress=progress)
-        with LOCK: STATE.update(status='complete',stats=stats)
-    except Exception as e:
-        with LOCK: STATE.update(status='failed',error=str(e))
+    @app.after_request
+    def headers(response):
+        response.headers['Cache-Control']='no-store'
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='no-referrer'
+        return response
 
-@app.post('/api/start')
-def start():
-    with LOCK:
-        if STATE['status']=='running': return jsonify(error='Already running'),409
-        try:
-            cfg=config_load(CONFIG)
-            if Config.parse(cfg).rows >= 50000000:
-                return jsonify(error='Full-scale generation is deferred to M5; use the CLI for authorized jobs'),400
-        except (ValueError, TypeError) as exc:
-            return jsonify(error=str(exc)),400
-        STATE.update(status='running',generated=0,target=Config.parse(cfg).rows,error=None,stats=None)
-        threading.Thread(target=runner,args=(cfg,),daemon=True).start()
-    return jsonify(status='started'),202
+    @app.errorhandler(KeyError)
+    def missing(exc): return jsonify(error='Run not found'),404
+
+    @app.errorhandler(Conflict)
+    def conflict(exc): return jsonify(error=str(exc)),409
+
+    @app.errorhandler(ValueError)
+    @app.errorhandler(TypeError)
+    @app.errorhandler(BadRequest)
+    def invalid(exc): return jsonify(error='Invalid configuration or request; check field types, ranges and scenario feasibility'),400
+
+    @app.get('/')
+    def index(): return render_template('index.html')
+
+    @app.get('/health')
+    def health(): return jsonify(ok=True)
+
+    @app.get('/api/preflight')
+    def preflight(): return jsonify(inspect(settings,registry()))
+
+    @app.get('/api/config/schema')
+    def config_schema():
+        return jsonify(schema_version='0.2',engine='local_parquet',write_mode='new_run',
+                       fields={'rows':{'type':'integer','minimum':1,'maximum':49999999},
+                               'batch_size':{'type':'integer','minimum':1}},
+                       default_config=config_load(settings.config),
+                       note='Operator-only scenario configuration. Output roots are controlled by deployment settings.')
+
+    @app.post('/api/runs')
+    @app.post('/api/start')
+    def submit():
+        payload = request.get_json(silent=False) if request.data else {}
+        if not isinstance(payload,dict): raise ValueError('Expected JSON object')
+        cfg = Config.parse(payload['config'] if 'config' in payload else config_load(settings.config))
+        if cfg.rows >= 50000000:
+            return jsonify(error='50M jobs remain disabled until M5 confirmation and capacity checks'),400
+        run_id = registry().submit(cfg)
+        return jsonify(run_id=run_id,status='queued'),202
+
+    @app.get('/api/runs')
+    def runs(): return jsonify(runs=[public_run(row) for row in registry().list()])
+
+    @app.get('/api/status')
+    def legacy_status():
+        rows = registry().list()
+        return jsonify(public_run(rows[0]) if rows else dict(status='idle',rows_written=0))
+
+    @app.get('/api/runs/<run_id>')
+    def get_run(run_id):
+        reg = registry()
+        result = public_run(reg.get(run_id))
+        result['logs'] = reg.events(run_id)
+        return jsonify(result)
+
+    @app.post('/api/runs/<run_id>/cancel')
+    def cancel(run_id):
+        registry().cancel(run_id)
+        return jsonify(run_id=run_id,status='cancellation_requested'),202
+
+    @app.post('/api/runs/<run_id>/retry')
+    def retry(run_id):
+        reg = registry()
+        old = reg.get(run_id)
+        new_id = reg.submit(json.loads(old['config_json']),parent=run_id)
+        return jsonify(run_id=new_id,parent_run_id=run_id,status='queued'),202
+
+    @app.post('/api/runs/<run_id>/validate')
+    def validate(run_id):
+        registry().request_validation(run_id)
+        return jsonify(run_id=run_id,status='validation_queued'),202
+
+    return app
+
+
+app = create_app()
 
 if __name__=='__main__':
     app.run(host='0.0.0.0',port=int(os.getenv('CDSW_APP_PORT',os.getenv('PORT','8080'))))

@@ -1,0 +1,7 @@
+# Generated public data and private evaluator artifacts must not enter source control.
+data/
+**/*_private/
+**/__pycache__/
+.pytest_cache/
+.venv/
+.DS_Store

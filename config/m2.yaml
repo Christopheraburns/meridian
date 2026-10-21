@@ -1,0 +1,36 @@
+schema_version: '0.2'
+name: meridian-payments-m2
+seed: 20261020
+scale:
+  transaction_rows: 1000000
+  batch_size: 25000
+  customers: 10000
+  merchants: 2000
+  terminals: 8000
+  processors: 8
+  start_date: '2026-09-01'
+  days: 75
+scenario:
+  id: payment_routing_v1
+  incident_start: '2026-10-09T00:00:00'
+  incident_end_exclusive: '2026-10-31T00:00:00'
+  faulty_processor_id: 3
+  faulty_configuration_version: '4.12'
+  targeted_network: Mastercard
+  targeted_channel: ecommerce
+  targeted_mcc: '4722'
+  cross_border_required: true
+  baseline_decline_rate: 0.035
+  affected_decline_rate: 0.24
+  target_bankwide_decline_rate_increase_pp: 0.5
+  target_candidate_share: 0.1977
+  target_processor_affinity: 0.70
+  canary_days: 2
+  canary_rollout: 0.20
+  steady_rollout: 0.80
+execution:
+  engine: local_parquet
+  output_dir: data/m2-public
+  database: meridian_financial
+  private_database: meridian_ground_truth
+  write_mode: new_run

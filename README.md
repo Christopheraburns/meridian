@@ -1,4 +1,4 @@
-# Meridian Financial Generator — v0.2 M0/M1
+# Meridian Financial Generator — v0.2 M0–M3
 
 Synthetic financial payments for the existing Cloudera investigation demo. The
 local generator now follows the existing Iceberg SQL contracts, with deterministic
@@ -31,13 +31,16 @@ physical output batching; --run-id fixes logical run identity for reproducibilit
 docker compose up --build
 ```
 
-Open http://localhost:8081 (container port 8080). Existing output remains mounted
-at ./data. Set GENERATOR_CONFIG=config/smoke.yaml for a small UI run and
-GENERATOR_OUTPUT to a fresh directory on the mounted volume. For example use
-`/app/data/smoke-public`; its private sibling `/app/data/smoke-public_private` will
-also persist on that mount. Do not expose the private directory to investigators.
-The default config retains your existing settings. The legacy single-user UI
-remains a prototype until M3; use the CLI for reliable controlled execution.
+Open http://localhost:8081 (container port 8080). Retrieve the operator token with
+`docker compose exec generator cat /state/operator.token`, then connect in the UI.
+The separate worker executes queued jobs; history survives web/container restarts.
+The default UI configuration is the 10k smoke profile. Public output persists in
+`data/public/<run_id>`; private truth in `data/private/<run_id>` is mounted only in
+the worker. SQLite/token state uses a persistent Docker-managed named volume.
+
+See [M3 jobs and API](docs/m3_jobs.md) for access roles, cancellation, retry,
+preflight and the Docker restart test. Keep private output and registry state
+inaccessible to investigators.
 
 ## Workbench and output
 
@@ -54,6 +57,8 @@ warehouse and treat it as committed data.
 
 [Schema audit](docs/schema_contract.md) describes types and invariants.
 [Runtime assumptions and M4 integration requirements](docs/runtime_assumptions.md)
-document remaining dependencies and milestone boundaries. M2 statistical
-calibration, M3 durable jobs, and M4 Spark integration are not implemented here.
+document remaining dependencies and milestone boundaries.
+[M2 scenario quality](docs/m2_scenario_quality.md) describes the calibrated 1M-row
+run, private evaluator and acceptance checks. M3 durable jobs are implemented;
+M4 Spark integration remains pending.
 No 50-million-row job has been run.

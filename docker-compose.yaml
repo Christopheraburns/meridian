@@ -2,10 +2,29 @@ services:
   generator:
     build: .
     ports:
-      - "8081:8080"
-    environment:
-      GENERATOR_CONFIG: config/default.yaml
-      GENERATOR_OUTPUT: /app/data
+      - "127.0.0.1:8081:8080"
+    environment: &environment
+      GENERATOR_CONFIG: config/smoke.yaml
+      GENERATOR_API_TOKEN: ${GENERATOR_API_TOKEN:-}
+      GENERATOR_VIEWER_TOKEN: ${GENERATOR_VIEWER_TOKEN:-}
+      GENERATOR_PUBLIC_ORIGIN: ${GENERATOR_PUBLIC_ORIGIN:-}
+      GENERATOR_STATE_DIR: /state
+      GENERATOR_OUTPUT: /app/data/public
+      GENERATOR_PRIVATE_OUTPUT: /private
     volumes:
-      - ./data:/app/data
+      - meridian_state:/state
+      - ./data/public:/app/data/public
     restart: unless-stopped
+  worker:
+    build: .
+    command: ["python", "worker.py"]
+    environment: *environment
+    volumes:
+      - meridian_state:/state
+      - ./data/public:/app/data/public
+      - ./data/private:/private
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+volumes:
+  meridian_state:
