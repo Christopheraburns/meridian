@@ -1,0 +1,20 @@
+schema_version: '0.2'
+name: meridian-payments-smoke
+seed: 20261020
+scale:
+  transaction_rows: 10000
+  batch_size: 1000
+  customers: 1000
+  merchants: 200
+  terminals: 400
+  processors: 8
+  start_date: '2026-09-01'
+  days: 60
+scenario:
+  id: payment_routing_v1
+execution:
+  engine: local_parquet
+  output_dir: data/smoke
+  database: meridian_financial
+  private_database: meridian_ground_truth
+  write_mode: new_run

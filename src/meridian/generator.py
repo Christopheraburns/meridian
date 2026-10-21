@@ -1,123 +1,69 @@
-"""Seeded, batch-oriented synthetic bank payment generator (no PII)."""
-import json
-import os
-import tempfile
-from datetime import date, datetime, timedelta
+"""Compatibility entry point for the CLI and existing Flask application."""
+from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
-
-import numpy as np
-import pyarrow as pa
-import pyarrow.parquet as pq
-import yaml
-
-NETWORKS = np.array(['Visa', 'Mastercard', 'Amex', 'Discover'])
-CHANNELS = np.array(['pos', 'ecommerce', 'mobile', 'recurring'])
-MCCS = np.array(['5411','5812','4722','5732','5999','4111','7011','5541'])
-COUNTRIES = np.array(['US','CA','GB','MX','DE','FR','JP','AU'])
+import json
+import uuid
+from .config import Config, config_load, timestamp
+from .dimensions import build_dimensions
+from .transactions import Transactions
+from .validation import Validator
+from .writers.parquet import write_json, write_table, content_hash
 
 
-def config_load(path):
-    with open(path, encoding='utf8') as f:
-        cfg = yaml.safe_load(f)
-    if int(cfg['rows']) < 1 or int(cfg['batch_size']) < 1:
-        raise ValueError('rows and batch_size must be positive')
-    if int(cfg['days']) < 1:
-        raise ValueError('days must be positive')
-    if not (0 <= float(cfg['incident']['baseline_decline_rate']) <= 1 and 0 <= float(cfg['incident']['injected_decline_rate']) <= 1):
-        raise ValueError('decline rates must be between 0 and 1')
-    if int(cfg['incident']['processor_id']) >= int(cfg['processors']) or int(cfg['incident']['processor_id']) < 0:
-        raise ValueError('incident processor_id must be within processor range')
-    return cfg
-
-
-def _write_json(path, obj):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tmp')
-    tmp.write_text(json.dumps(obj, indent=2, default=str), encoding='utf8')
-    os.replace(tmp, path)
-
-
-def _write_dimensions(root, cfg):
-    """Dimension records are deterministic; IDs are non-identifying synthetic keys."""
-    dims = root / 'dimensions'
-    dims.mkdir(parents=True, exist_ok=True)
-    for name, count, attrs in [
-        ('customers', cfg['customers'], {'segment': ['consumer','premium','small_business','enterprise'], 'home_country': COUNTRIES}),
-        ('merchants', cfg['merchants'], {'mcc': MCCS, 'country': COUNTRIES}),
-        ('payment_processors', cfg['processors'], {'name': ['Northstar','Pinnacle','Harbor','Orion','Summit','Apex','Cedar','AtlasPay']}),
-    ]:
-        count = int(count)
-        ids = np.arange(count, dtype=np.int64)
-        d = {name[:-1] + '_id' if name != 'payment_processors' else 'processor_id': ids}
-        for key, choices in attrs.items():
-            choices = np.asarray(choices)
-            d[key] = choices[ids % len(choices)]
-        pq.write_table(pa.table(d), dims / f'{name}.parquet', compression='zstd')
-    inc = cfg['incident']
-    deployment = pa.table({'deployment_id': ['DEP-412'], 'processor_id': [int(inc['processor_id'])], 'configuration_version': ['4.12'], 'deployed_on': [inc['start_date']], 'change_type': ['routing_configuration'], 'summary': ['Payment routing rule change']})
-    pq.write_table(deployment, dims / 'deployment_events.parquet', compression='zstd')
-    routing = pa.table({'routing_rule_id': [412], 'processor_id':[int(inc['processor_id'])], 'configuration_version':['4.12'], 'valid_from':[inc['start_date']], 'rule_family':['cross_border_card_routing']})
-    pq.write_table(routing, dims / 'routing_rules.parquet', compression='zstd')
-
-
-def generate(cfg, output=None, progress=None, max_batches=None):
-    root = Path(output or cfg['output_dir']).resolve()
+def generate(cfg, output=None, progress=None, max_batches=None, run_id=None, private_output=None):
+    cfg = Config.parse(cfg)
+    if max_batches is not None and (type(max_batches) is not int or max_batches < 1): raise ValueError('max_batches must be positive')
+    run_id = run_id or str(uuid.uuid4())
+    root = Path(output or cfg.output_dir).resolve()
+    # Private data is a sibling, never nested in the public output tree.
+    private = Path(private_output).resolve() if private_output else root.with_name(root.name + '_private')
+    if root == private or root in private.parents or private in root.parents:
+        raise ValueError('Public and private output directories must be separate trees')
     root.mkdir(parents=True, exist_ok=True)
-    transactions = root / 'payment_transactions'
-    transactions.mkdir(exist_ok=True)
-    _write_dimensions(root, cfg)
-    rows = int(cfg['rows']); batch = int(cfg['batch_size']); seed = int(cfg['seed'])
-    start = date.fromisoformat(cfg['start_date']); inc = cfg['incident']
-    inc_start = (date.fromisoformat(inc['start_date']) - start).days
-    inc_end = (date.fromisoformat(inc['end_date']) - start).days
-    totals = {'rows': 0, 'declined': 0, 'exposed': 0, 'exposed_declined': 0, 'injected_excess_expected': 0.0}
-    manifest_path = root / 'public_manifest.json'
-    config_public = {k:v for k,v in cfg.items() if k != 'incident'}
-    _write_json(root / 'configuration_public.json', config_public)
-    batches = (rows + batch - 1) // batch
-    for i in range(batches):
-        if max_batches is not None and i >= max_batches: break
-        path = transactions / f'part-{i:06d}.parquet'
-        # independent RNG per batch allows deterministic resume, without re-running prior batches
-        rng = np.random.default_rng(np.random.SeedSequence([seed, i]))
-        n = min(batch, rows - i*batch)
-        day = rng.integers(0, int(cfg['days']), size=n, dtype=np.int16)
-        timestamp = np.datetime64(str(start)) + day.astype('timedelta64[D]') + rng.integers(0,86400,size=n).astype('timedelta64[s]')
-        processor = rng.integers(0,int(cfg['processors']),size=n,dtype=np.int16)
-        network = rng.choice(NETWORKS,size=n,p=[0.50,0.35,0.10,0.05])
-        channel = rng.choice(CHANNELS,size=n,p=[0.48,0.32,0.15,0.05])
-        mcc = rng.choice(MCCS,size=n)
-        foreign = rng.random(n) < 0.18
-        country = np.where(foreign, rng.choice(COUNTRIES[1:],size=n), 'US')
-        affected = ((day >= inc_start) & (day <= inc_end) &
-                    (processor == int(inc['processor_id'])) &
-                    (network == inc['card_network']) & (channel == inc['channel']) &
-                    foreign & (mcc == inc['mcc']))
-        if not inc['enabled']: affected[:] = False
-        # A controlled incident increases decline probability for an identifiable cohort.
-        p = np.where(affected, float(inc['injected_decline_rate']), float(inc['baseline_decline_rate']))
-        declined = rng.random(n) < p
-        routing_rule = np.where(affected,412,100 + processor)
-        table = pa.table({
-            'transaction_id': np.arange(i*batch,i*batch+n,dtype=np.int64) + 1,
-            'transaction_ts': pa.array(timestamp, type=pa.timestamp('s')),
-            'customer_id': rng.integers(0,int(cfg['customers']),size=n,dtype=np.int64),
-            'merchant_id': rng.integers(0,int(cfg['merchants']),size=n,dtype=np.int64),
-            'amount_usd': np.round(rng.lognormal(4.2,1.0,size=n),2),
-            'processor_id': processor, 'card_network': network, 'channel': channel,
-            'merchant_category_code': mcc, 'cross_border': foreign,
-            'merchant_country': country, 'routing_rule_id': routing_rule.astype('int16'),
-            'approved': ~declined,
-            'response_code': np.where(declined,'05','00'),
-        })
-        tmp = path.with_suffix('.parquet.tmp')
-        pq.write_table(table,tmp,compression='zstd',row_group_size=100000)
-        os.replace(tmp,path)
-        totals['rows'] += n; totals['declined'] += int(declined.sum())
-        totals['exposed'] += int(affected.sum()); totals['exposed_declined'] += int((affected & declined).sum())
-        totals['injected_excess_expected'] += float(affected.sum() * (float(inc['injected_decline_rate']) - float(inc['baseline_decline_rate'])))
-        _write_json(manifest_path, {'name':cfg['name'],'seed':seed,'rows_generated':totals['rows'],'requested_rows':rows,'complete': totals['rows']==rows,'format':'parquet','dataset_path':'payment_transactions','last_batch':i})
-        if progress: progress(totals['rows'],rows)
-    # SECRET: keep out of the published Iceberg/data folder and agent MCP scope.
-    _write_json(root / '_private_ground_truth' / 'incident.json', {'incident':inc,'generation_stats':totals,'explanation':'Routing version 4.12 raises decline probability for the specified cohort. This private file must not be exposed to the investigation agent.'})
-    return totals
+    if any(root.iterdir()): raise ValueError('new_run requires an empty output directory; choose a fresh --output')
+    private.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if any(private.iterdir()): raise ValueError('Private output must be empty for new_run')
+    private.chmod(0o700)
+    started = datetime.utcnow()
+    manifest = dict(generation_run_id=run_id, rows_generated=0, requested_rows=cfg.rows, complete=False, format='parquet', dataset_path='payment_transactions', status='running')
+    write_json(root/'public_manifest.json', manifest)
+    total = excess = exposed = declined = 0
+    affected_amount = Decimal('0.00')
+    audits = []
+    run = dict(generation_run_id=run_id, generator_version='0.2', scenario_name=cfg.scenario.id, seed=cfg.seed, configuration_hash=cfg.content_hash, requested_transaction_count=cfg.rows, generated_transaction_count=0, generation_started_ts=started, generation_completed_ts=None, dataset_start_ts=cfg.start, dataset_end_ts=cfg.end, run_status='running', validation_status='pending', notes='Local Parquet; no Iceberg commit. Each row is one original authorization attempt; retries disabled.')
+    try:
+        dimensions = build_dimensions(cfg, run_id)
+        source = Transactions(cfg, dimensions, run_id)
+        validator = Validator(cfg, dimensions, run_id)
+        for name, records in dimensions.items(): write_table(root/'dimensions'/f'{name}.parquet', name, records)
+        for batch_id, offset in enumerate(range(0, cfg.rows, cfg.batch_size)):
+            if max_batches is not None and batch_id >= max_batches: break
+            rows, truth = source.batch(range(offset+1, min(offset+cfg.batch_size, cfg.rows)+1))
+            validator.validate(rows)
+            written = write_table(root/'payment_transactions'/f'part-{batch_id:06d}.parquet', 'payment_transactions', rows)
+            n_exposed = sum(t[0] for t in truth); n_excess = sum(t[1] for t in truth)
+            exposed += n_exposed; excess += n_excess
+            affected_amount += sum((r['amount_usd'] for r, t in zip(rows, truth) if t[1]), Decimal('0.00'))
+            declined += sum(not r['approved'] for r in rows); total += written
+            audits.append(dict(generation_run_id=run_id, batch_id=batch_id, rows_written=written, exposed_transactions=n_exposed, injected_declines=n_excess, batch_hash=content_hash(rows), written_ts=datetime.utcnow(), write_status='written'))
+            manifest.update(rows_generated=total)
+            write_json(root/'public_manifest.json', manifest)
+            if progress: progress(total, cfg.rows)
+        s = cfg.scenario
+        truth_row = dict(generation_run_id=run_id, incident_id=s.id, incident_name='Payment routing configuration regression', incident_type='routing', incident_start_ts=timestamp(s.incident_start), incident_end_ts=timestamp(s.incident_end_exclusive), injected_processor_id=s.faulty_processor_id, injected_routing_rule_id=1000+s.faulty_processor_id, injected_configuration_version=s.faulty_configuration_version, predicate_json=json.dumps(dict(network=s.targeted_network, channel=s.targeted_channel, mcc=s.targeted_mcc, cross_border_required=s.cross_border_required)), expected_exposed_transactions=exposed, expected_excess_declines=excess, expected_affected_amount_usd=affected_amount, causal_explanation='Version rollout rejects a cross-border travel card segment conditional on actual routing exposure.', validation_notes=json.dumps(dict(enabled=s.enabled, expected_value_excess=exposed*(s.affected_decline_rate-s.baseline_decline_rate), realized_excess=excess, realized_bankwide_increase_pp=100*excess/total if total else 0, target_increase_pp=s.target_bankwide_decline_rate_increase_pp, amount_definition='USD payment volume of incremental declines; not revenue or bank loss')))
+        write_table(private/'scenario_ground_truth.parquet', 'scenario_ground_truth', [truth_row])
+        write_table(private/'generation_batch_audit.parquet', 'generation_batch_audit', audits)
+        complete = total == cfg.rows
+        run.update(generated_transaction_count=total, generation_completed_ts=datetime.utcnow(), run_status='complete' if complete else 'partial', validation_status='passed' if complete else 'partial')
+        write_table(root/'dimensions'/'generation_runs.parquet', 'generation_runs', [run])
+        manifest.update(complete=complete, status=run['run_status'])
+        write_json(root/'public_manifest.json', manifest)
+    except Exception:
+        manifest.update(status='failed', complete=False)
+        write_json(root/'public_manifest.json', manifest)
+        run.update(generated_transaction_count=total, run_status='failed', validation_status='failed')
+        write_table(root/'dimensions'/'generation_runs.parquet', 'generation_runs', [run])
+        raise
+    # Shared with legacy UI: never expose counterfactuals or cohort counts here.
+    return dict(rows=total, declined=declined, generation_run_id=run_id, complete=complete)

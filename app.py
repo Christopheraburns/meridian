@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 import threading
 from flask import Flask, jsonify, request, render_template_string
 from meridian.generator import config_load, generate
+from meridian.config import Config
 
 app=Flask(__name__)
 STATE={'status':'idle','generated':0,'target':0,'error':None,'stats':None}
@@ -37,8 +38,13 @@ def runner(cfg):
 def start():
     with LOCK:
         if STATE['status']=='running': return jsonify(error='Already running'),409
-        cfg=config_load(CONFIG)
-        STATE.update(status='running',generated=0,target=int(cfg['rows']),error=None,stats=None)
+        try:
+            cfg=config_load(CONFIG)
+            if Config.parse(cfg).rows >= 50000000:
+                return jsonify(error='Full-scale generation is deferred to M5; use the CLI for authorized jobs'),400
+        except (ValueError, TypeError) as exc:
+            return jsonify(error=str(exc)),400
+        STATE.update(status='running',generated=0,target=Config.parse(cfg).rows,error=None,stats=None)
         threading.Thread(target=runner,args=(cfg,),daemon=True).start()
     return jsonify(status='started'),202
 

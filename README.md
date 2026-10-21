@@ -1,6 +1,29 @@
-# Meridian Financial Generator — v0.1
+# Meridian Financial Generator — v0.2 M0/M1
 
-Portable generator for the Cloudera/Mistral recursive-lakehouse financial investigation demo. **All persons, institutions, merchants and transactions are synthetic.** No genuine customer data is used.
+Synthetic financial payments for the existing Cloudera investigation demo. The
+local generator now follows the existing Iceberg SQL contracts, with deterministic
+per-ID generation, coherent dimensions and separate private counterfactual truth.
+No real customer data or warehouse credentials are used.
+
+## 10,000-row smoke test
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+PYTHONPATH=src python3 -m pytest -q
+python3 cli.py --config config/smoke.yaml --output /tmp/meridian-public \
+  --private-output /tmp/meridian-private --rows 10000
+```
+
+Choose fresh, empty output directories for each run. Or use
+`bash scripts/smoke_test.sh`, which runs tests and a 10k CLI job in a fresh temporary
+directory. Set PYTHON_BIN if your interpreter has a different name. The tests
+generate 10k twice with batch sizes 731 and 2048 and compare normalized hashes,
+all schemas, referential integrity, and exact realized anomaly accounting.
+
+The existing flat config/default.yaml and CLI --rows/--max-batches options remain
+supported; config/smoke.yaml demonstrates the typed v0.2 form. --batch-size changes
+physical output batching; --run-id fixes logical run identity for reproducibility.
+--max-batches intentionally creates a partial run, never a completed dataset.
 
 ## Docker Desktop
 
@@ -8,39 +31,29 @@ Portable generator for the Cloudera/Mistral recursive-lakehouse financial invest
 docker compose up --build
 ```
 
-Open http://localhost:8080 and click **Start generation**. Output persists to `./data`. Default generates **50,000,000** rows; edit `config/default.yaml` before startup for a smaller test. Docker Desktop should have enough local disk space for the data and sufficient container memory for a 250,000-row batch. Actual usage varies with compression.
+Open http://localhost:8081 (container port 8080). Existing output remains mounted
+at ./data. Set GENERATOR_CONFIG=config/smoke.yaml for a small UI run and
+GENERATOR_OUTPUT to a fresh directory on the mounted volume. For example use
+`/app/data/smoke-public`; its private sibling `/app/data/smoke-public_private` will
+also persist on that mount. Do not expose the private directory to investigators.
+The default config retains your existing settings. The legacy single-user UI
+remains a prototype until M3; use the CLI for reliable controlled execution.
 
-## CLI / Workbench
+## Workbench and output
 
-```bash
-python -m pip install -r requirements.txt
-export PYTHONPATH=src
-python cli.py --rows 100000 --output data
-python app.py
-```
+Run `python3 app.py` as before; CDSW_APP_PORT is honored. See [WORKBENCH.md](WORKBENCH.md).
+All ten public tables are written under the selected public output directory:
+transaction parts in payment_transactions/, other tables in dimensions/. Private
+truth and audits are in a separate 0700 directory, never under the public tree.
+Only publish the public tree after public_manifest.json reports complete=true.
 
-For **Cloudera AI Workbench**, upload the repository to a project, install `requirements.txt` in a compatible Python runtime, and create an **Application** with entry script `app.py`. The server binds to `CDSW_APP_PORT` when present. For an offline/locked-down environment mirror the Python packages into your approved package repository. A custom runtime image, if needed, must be derived from an administrator-approved compatible Cloudera runtime—not this generic local Dockerfile. Put generated output on durable project storage, not ephemeral application filesystem.
+The generator writes **local Parquet**, not committed Iceberg tables. The SQL
+files in sql/schema/ are immutable read-only contracts for tables already created.
+Never execute these files as part of generation, or copy Parquet into an Iceberg
+warehouse and treat it as committed data.
 
-## Design
-
-- Seeded NumPy batches write **Parquet** files readable by Spark and suitable for subsequent Iceberg ingestion.
-- Outputs: `payment_transactions/`, `dimensions/`, `public_manifest.json`, `configuration_public.json`, and `_private_ground_truth/incident.json`.
-- The injected decline probability increases for cross-border Mastercard ecommerce travel (MCC 4722) routed through processor 3 during the incident period.
-- Public transaction data contains `routing_rule_id=412` for the affected cohort; historical routing and deployment lookup tables allow model agents to investigate it.
-- **Do not publish** `_private_ground_truth` through MCP or into an agent-accessible lakehouse namespace.
-- **Important:** v0.1 writes Parquet, **not committed Iceberg tables**. The next milestone is a deployment-specific Spark/Iceberg ingestion job against a configured Cloudera warehouse/catalog. Do not just point PyIceberg at an unverified Cloudera Hive Metastore configuration.
-- **Important:** v0.1 is a local/prototype generator with one worker and an in-process job state. The UI does not implement login itself; rely on Cloudera's app access control and do not expose its unauthenticated port to the public internet. No resumable/parallel generation yet.
-
-## Tests
-
-```bash
-python -m pip install -r requirements-dev.txt
-PYTHONPATH=src pytest -q
-```
-
-## Next phases
-
-1. Add configurable profiles and richer coherent routing/event history, customer and merchant joins, and incident validation metrics.
-2. Add durable batch ledger, resume/retry, workers, cancellation and integrity checks.
-3. Add Spark-based writes/registration to governed Iceberg tables and Impala validation queries.
-4. Add UI job configuration editor, progress charts, health metrics, separate private truth storage, and evaluation scenarios.
+[Schema audit](docs/schema_contract.md) describes types and invariants.
+[Runtime assumptions and M4 integration requirements](docs/runtime_assumptions.md)
+document remaining dependencies and milestone boundaries. M2 statistical
+calibration, M3 durable jobs, and M4 Spark integration are not implemented here.
+No 50-million-row job has been run.

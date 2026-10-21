@@ -2,7 +2,7 @@ services:
   generator:
     build: .
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       GENERATOR_CONFIG: config/default.yaml
       GENERATOR_OUTPUT: /app/data
