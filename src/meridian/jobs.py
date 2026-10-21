@@ -22,11 +22,14 @@ class Settings:
     config: Path
 
     @classmethod
-    def environment(cls):
+    def environment(cls, project_root=None):
         state = Path(os.environ.get('GENERATOR_STATE_DIR', str(Path.home()/'.local/state/meridian'))).resolve()
         public = Path(os.environ.get('GENERATOR_OUTPUT', str(Path.home()/'.local/share/meridian/public'))).resolve()
         private = Path(os.environ.get('GENERATOR_PRIVATE_OUTPUT', str(Path.home()/'.local/share/meridian/private'))).resolve()
-        return cls(state,public,private,Path(os.environ.get('GENERATOR_CONFIG','config/smoke.yaml')).resolve())
+        config = Path(os.environ.get('GENERATOR_CONFIG','config/smoke.yaml')).expanduser()
+        if not config.is_absolute():
+            config = Path(project_root or Path.cwd())/config
+        return cls(state,public,private,config.resolve())
 
     def validate(self):
         roots = [self.state.resolve(),self.public.resolve(),self.private.resolve()]

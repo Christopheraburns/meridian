@@ -47,3 +47,10 @@ job provisioning, storage locks and platform authorization require environment
 verification. No Iceberg commits or schema changes occur. M4 requires approved
 Spark/catalog configuration and separate credentials before a small integration
 write; see [M4 dependencies](docs/runtime_assumptions.md#information-required-for-m4).
+
+If Workbench executes app.py through a notebook/cell runner, `__file__` may be
+absent. The app locates the checkout from the current directory or its parents.
+If the checkout is elsewhere, set `GENERATOR_PROJECT_ROOT` to its absolute path
+(the directory containing app.py and src/meridian). Template paths and relative
+GENERATOR_CONFIG paths are resolved against that root. When copying code manually,
+keep the Python identifier `__file__` literal; `**file**` is Markdown, not Python.

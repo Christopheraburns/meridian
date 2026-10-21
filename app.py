@@ -3,7 +3,28 @@ import json
 from pathlib import Path
 import os
 import sys
-sys.path.insert(0,str(Path(__file__).resolve().parent/'src'))
+
+def project_root():
+    """Workbench cell execution may omit __file__; do not depend on it."""
+    configured = os.environ.get('GENERATOR_PROJECT_ROOT')
+    if configured:
+        candidates = [Path(configured).expanduser().resolve()]
+    elif globals().get('__file__'):
+        candidates = [Path(__file__).resolve().parent]
+    else:
+        current = Path.cwd().resolve()
+        candidates = [current, *current.parents]
+    for candidate in candidates:
+        if (candidate/'src/meridian/__init__.py').is_file() and (candidate/'config/smoke.yaml').is_file():
+            return candidate
+    raise RuntimeError(
+        'Cannot locate the Meridian checkout. Start from its root or set '
+        'GENERATOR_PROJECT_ROOT to the directory containing app.py and src/meridian.'
+    )
+
+
+PROJECT_ROOT = project_root()
+sys.path.insert(0,str(PROJECT_ROOT/'src'))
 from flask import Flask, jsonify, request, render_template
 from werkzeug.exceptions import BadRequest
 from meridian.config import Config, config_load
@@ -14,9 +35,9 @@ from meridian.preflight import inspect
 
 
 def create_app(settings=None):
-    settings = settings or Settings.environment()
+    settings = settings or Settings.environment(project_root=PROJECT_ROOT)
     settings.validate()
-    app = Flask(__name__,template_folder='src/meridian/web/templates')
+    app = Flask(__name__,template_folder=str(PROJECT_ROOT/'src/meridian/web/templates'))
     app.config['MAX_CONTENT_LENGTH'] = 64*1024
 
     def registry(): return Registry(settings.state)
