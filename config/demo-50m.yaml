@@ -1,0 +1,43 @@
+schema_version: '0.2'
+name: meridian-payments-demo-50m
+seed: 20261020
+# Evolve NY 50M profile for CDW (BURNDOWN D6). Same calendar and scenario as
+# config/demo.yaml; only scale differs. The m2 calendar shifted back
+# 28 days so weekdays, calibration and phase lengths are unchanged, and the
+# whole incident, including recovery, is in the past at demo time:
+#   pre-incident  2026-08-04 .. 2026-09-10
+#   incident      2026-09-11 .. 2026-10-02 (4.12 canary 09-11..09-12, then 80%)
+#   recovery      2026-10-03 .. 2026-10-17 (last data day)
+scale:
+  transaction_rows: 50000000
+  batch_size: 100000
+  customers: 500000
+  merchants: 20000
+  terminals: 80000
+  processors: 8
+  start_date: '2026-08-04'
+  days: 75
+scenario:
+  id: payment_routing_v1
+  incident_start: '2026-09-11T00:00:00'
+  incident_end_exclusive: '2026-10-03T00:00:00'
+  faulty_processor_id: 3
+  faulty_configuration_version: '4.12'
+  targeted_network: Mastercard
+  targeted_channel: ecommerce
+  targeted_mcc: '4722'
+  cross_border_required: true
+  baseline_decline_rate: 0.035
+  affected_decline_rate: 0.24
+  target_bankwide_decline_rate_increase_pp: 0.5
+  target_candidate_share: 0.1977
+  target_processor_affinity: 0.70
+  canary_days: 2
+  canary_rollout: 0.20
+  steady_rollout: 0.80
+execution:
+  engine: local_parquet
+  output_dir: data/demo-50m-public
+  database: meridian_financial
+  private_database: meridian_ground_truth
+  write_mode: new_run
