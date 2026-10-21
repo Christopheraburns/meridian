@@ -56,6 +56,8 @@ Never execute these files as part of generation, or copy Parquet into an Iceberg
 warehouse and treat it as committed data.
 
 [Schema audit](docs/schema_contract.md) describes types and invariants.
+[Warehouse reconciliation](docs/warehouse_reconciliation.md) checks a loaded
+Impala copy group by group against the private evaluator.
 [Runtime assumptions and M4 integration requirements](docs/runtime_assumptions.md)
 document remaining dependencies and milestone boundaries.
 [M2 scenario quality](docs/m2_scenario_quality.md) describes the calibrated 1M-row
