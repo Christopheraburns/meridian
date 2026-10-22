@@ -77,3 +77,9 @@ M4 must run platform-specific preflight before any mutation, fail with actionabl
 blockers, then commit a small authorized run and verify through Impala. Copying
 Parquet into warehouse locations is not a supported fallback. No live Cloudera,
 Spark, Iceberg or Ranger validation is claimed in M0–M3.
+
+M4 status: implemented as `impala_staged_load` ([M4 warehouse writer](m4_warehouse.md)),
+which needs only the Impala endpoint, identities, Ranger grants and a staging
+location from the list above; the Spark and catalog items apply only if a Spark
+writer is added later. Verified against a local Impala 4.5.3 with NOSASL; no CDW
+or Ranger validation has been run yet.

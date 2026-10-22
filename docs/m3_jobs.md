@@ -119,8 +119,10 @@ mutation checks accept the Workbench UI. Keep platform access controls enabled.
 
 `python3 scripts/preflight.py` reports local readiness and returns nonzero when
 no worker is available or local checks fail. Spark-installed detection is only a
-runtime diagnostic; `spark_iceberg.ready` remains false until M4 validates catalog,
-authentication, existing table schemas, native commits and Impala visibility.
+runtime diagnostic; `spark_iceberg.ready` stays false because M4 commits through
+Impala instead. The `warehouse` section reports which identities are configured,
+without secrets or connections; `python3 scripts/warehouse.py preflight` runs the
+live checks ([M4](m4_warehouse.md)).
 
 ## Tests
 

@@ -1,10 +1,11 @@
-"""Local readiness and explicit M4 blockers; never attempts warehouse writes."""
+"""Local readiness and warehouse configuration; never connects to or writes the warehouse."""
 import importlib.util
 import platform
 import shutil
 import tempfile
 from .schema_contract import contracts
 from .jobs import worker_alive
+from .warehouse.identity import identities
 
 
 def inspect(settings,registry):
@@ -22,4 +23,17 @@ def inspect(settings,registry):
                                   worker_last_seen=registry.last_seen(),
                                   free_bytes=shutil.disk_usage(registry.root).free),
                 runtime=dict(python=platform.python_version(),spark_installed=importlib.util.find_spec('pyspark') is not None),
-                spark_iceberg=dict(ready=False,blockers=['M4 catalog, credentials, schema access and native Iceberg commit/Impala visibility have not been validated']))
+                spark_iceberg=dict(ready=False,blockers=['Not used: M4 commits through impala_staged_load (docs/m4_warehouse.md)']),
+                warehouse=warehouse())
+
+
+def warehouse():
+    # Configuration only: live checks open Impala sessions and belong to scripts/warehouse.py preflight.
+    try:
+        configured = {role:(i.describe() if i else None) for role,i in identities().items()}
+        error = None
+    except (OSError, ValueError) as exc:
+        configured, error = {}, str(exc)
+    return dict(engine='impala_staged_load',identities=configured,error=error,
+                configured=bool(configured) and all(configured.values()),
+                live_check='python3 scripts/warehouse.py preflight')

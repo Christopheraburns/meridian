@@ -50,10 +50,13 @@ transaction parts in payment_transactions/, other tables in dimensions/. Private
 truth and audits are in a separate 0700 directory, never under the public tree.
 Only publish the public tree after public_manifest.json reports complete=true.
 
-The generator writes **local Parquet**, not committed Iceberg tables. The SQL
-files in sql/schema/ are immutable read-only contracts for tables already created.
-Never execute these files as part of generation, or copy Parquet into an Iceberg
-warehouse and treat it as committed data.
+The generator writes **local Parquet**. M4's `scripts/warehouse.py load` then commits
+a complete, validated run into the existing Iceberg tables through Impala, with
+separate public-writer, private-writer and agent identities; see
+[M4 warehouse writer](docs/m4_warehouse.md). The SQL files in sql/schema/ are
+immutable read-only contracts for tables already created. Never execute these
+files as part of generation, or copy Parquet into an Iceberg warehouse and treat
+it as committed data.
 
 [Schema audit](docs/schema_contract.md) describes types and invariants.
 [Warehouse reconciliation](docs/warehouse_reconciliation.md) checks a loaded
@@ -62,5 +65,6 @@ Impala copy group by group against the private evaluator.
 document remaining dependencies and milestone boundaries.
 [M2 scenario quality](docs/m2_scenario_quality.md) describes the calibrated 1M-row
 run, private evaluator and acceptance checks. M3 durable jobs are implemented;
-M4 Spark integration remains pending.
+M4 commits through Impala (`impala_staged_load`), verified locally; the CDW run
+and Ranger isolation check remain.
 No 50-million-row job has been run.

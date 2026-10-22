@@ -44,9 +44,13 @@ registry state must not be mounted into MCP or investigator sessions.
 See [M3 job lifecycle and API](docs/m3_jobs.md) for cancellation, retry, authentication,
 preflight and restart behavior. M3 local/Docker behavior is tested; live Workbench
 job provisioning, storage locks and platform authorization require environment
-verification. No Iceberg commits or schema changes occur. M4 requires approved
-Spark/catalog configuration and separate credentials before a small integration
-write; see [M4 dependencies](docs/runtime_assumptions.md#information-required-for-m4).
+verification. The Application and worker never write the warehouse.
+
+To commit a run into CDW, install requirements-warehouse.txt in a session or Job,
+set the MERIDIAN_* identity and staging variables from Workbench secrets, run
+`python3 scripts/warehouse.py preflight` until it reports no blockers, then
+`stage`, copy the staged trees to object storage, and `load`. See
+[M4 warehouse writer](docs/m4_warehouse.md).
 
 If Workbench executes app.py through a notebook/cell runner, `__file__` may be
 absent. The app locates the checkout from the current directory or its parents.
