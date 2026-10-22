@@ -10,8 +10,15 @@ from .warehouse.identity import identities
 
 def inspect(settings,registry):
     settings.validate()
-    checks = {'schema_contracts':len(contracts())==12, 'registry':True,
-              'worker_online':worker_alive(registry)}
+    checks = {'schema_contracts':len(contracts())==12, 'registry':True}
+    locking_error = None
+    try:
+        checks['worker_online'] = worker_alive(registry)
+        checks['registry_locking'] = True
+    except OSError as exc:
+        # Network filesystems may not support flock; the worker cannot fence writers there.
+        checks['worker_online'] = checks['registry_locking'] = False
+        locking_error = f'{type(exc).__name__}: {exc.strerror or exc}'
     try:
         settings.public.mkdir(parents=True,exist_ok=True)
         with tempfile.TemporaryFile(dir=settings.public) as stream:
@@ -19,7 +26,7 @@ def inspect(settings,registry):
         checks['public_storage_writable'] = True
     except OSError:
         checks['public_storage_writable'] = False
-    return dict(local_parquet=dict(ready=all(checks.values()),checks=checks,
+    return dict(local_parquet=dict(ready=all(checks.values()),checks=checks,locking_error=locking_error,
                                   worker_last_seen=registry.last_seen(),
                                   free_bytes=shutil.disk_usage(registry.root).free),
                 runtime=dict(python=platform.python_version(),spark_installed=importlib.util.find_spec('pyspark') is not None),

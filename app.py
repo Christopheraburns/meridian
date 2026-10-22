@@ -26,7 +26,7 @@ def project_root():
 PROJECT_ROOT = project_root()
 sys.path.insert(0,str(PROJECT_ROOT/'src'))
 from flask import Flask, jsonify, request, render_template
-from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import BadRequest, HTTPException
 from meridian.config import Config, config_load
 from meridian.jobs import Settings
 from meridian.registry import Registry, Conflict, public_run
@@ -66,6 +66,13 @@ def create_app(settings=None):
     @app.errorhandler(TypeError)
     @app.errorhandler(BadRequest)
     def invalid(exc): return jsonify(error='Invalid configuration or request; check field types, ranges and scenario feasibility'),400
+
+    @app.errorhandler(Exception)
+    def unexpected(exc):
+        if isinstance(exc,HTTPException): return exc
+        # Full traceback goes to the application log only; the response names the failure, not paths or config.
+        app.logger.exception('Unhandled error in %s %s',request.method,request.path)
+        return jsonify(error=f'{type(exc).__name__} in {request.path}; see the application log'),500
 
     @app.get('/')
     def index(): return render_template('index.html')

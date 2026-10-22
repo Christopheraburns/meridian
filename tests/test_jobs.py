@@ -181,3 +181,20 @@ def test_recovery_invalidates_corrupt_manifest_without_replay(settings):
     manifest=json.loads((root/'public_manifest.json').read_text())
     assert not manifest['complete'] and manifest['rows_generated']==1200
     assert manifest['requested_rows']==1200
+
+
+def test_unexpected_errors_are_json_and_unsupported_locking_is_reported(settings,monkeypatch):
+    import errno, fcntl, sqlite3
+    import meridian.registry as registry_module
+    web = client(settings)
+    def no_locks(*args): raise OSError(errno.ENOLCK,'No locks available')
+    monkeypatch.setattr(fcntl,'flock',no_locks)
+    report = web.get('/api/preflight').json['local_parquet']
+    assert report['ready'] is False and report['checks']['registry_locking'] is False
+    assert 'No locks available' in report['locking_error']
+    def broken(self,write=False): raise sqlite3.OperationalError('disk I/O error')
+    monkeypatch.setattr(registry_module.Registry,'connect',broken)
+    response = web.get('/api/runs')
+    assert response.status_code==500 and response.is_json
+    assert response.json['error']=='OperationalError in /api/runs; see the application log'
+    assert web.get('/no-such-page').status_code==404
