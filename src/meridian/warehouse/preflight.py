@@ -84,7 +84,7 @@ def other_runs(session, database, tables, run_id):
     return found
 
 
-def inspect(identities, target, run_id='-', allow_unauthenticated=False, sessions=None):
+def inspect(identities, target, run_id='-', allow_unauthenticated=False, sessions=None, accept_shared_login=False):
     """Return a secret-free readiness report; ``sessions`` lets callers reuse open sessions."""
     report = Report()
     sessions = dict(sessions or {})
@@ -95,12 +95,15 @@ def inspect(identities, target, run_id='-', allow_unauthenticated=False, session
     configured = {role: i for role, i in identities.items() if i is not None}
     authenticated = all(i.authenticated for i in configured.values()) and not missing
     severity = 'warning' if allow_unauthenticated else 'blocker'
+    # Explicit interim choice: load before the agent login exists. Isolation is re-proved later by preflight alone.
+    isolation = 'warning' if allow_unauthenticated or accept_shared_login else 'blocker'
     report.add('authentication', authenticated,
                'all identities authenticate' if authenticated else 'NOSASL identities cannot prove separation or Ranger isolation; local development only',
                severity)
     if authenticated:
         agent, public, private = (configured[r].principal for r in ('agent', 'public_writer', 'private_writer'))
-        report.add('identity separation', agent not in (public, private), 'agent must not share a login with either writer')
+        report.add('identity separation', agent not in (public, private), 'agent must not share a login with either writer'
+                   + ('; accepted for this load with --accept-shared-login' if accept_shared_login else ''), isolation)
         report.add('writer separation', public != private, 'public and private writers should be distinct logins', 'warning')
     try:
         for role, identity in configured.items():
@@ -116,7 +119,7 @@ def inspect(identities, target, run_id='-', allow_unauthenticated=False, session
             check_tables(report, sessions['agent'], target.database, PUBLIC_TABLES)
             try:
                 sessions['agent'].execute(f'SELECT 1 FROM {target.private_database}.scenario_ground_truth LIMIT 1')
-                report.add('agent private isolation', False, f'agent identity can read {target.private_database}; deny it in Ranger', severity)
+                report.add('agent private isolation', False, f'agent identity can read {target.private_database}; deny it in Ranger', isolation)
             except Exception as exc:
                 message = str(exc).lower()
                 report.add('agent private isolation', any(m in message for m in DENIAL_MARKERS),

@@ -18,6 +18,20 @@ def _checkout():
 
 
 sys.path.insert(0, str(_checkout()/'src'))
+
+
+def _job_arguments():
+    """Workbench Jobs run in a kernel whose sys.argv holds kernel flags; MERIDIAN_ARGS carries the script's arguments."""
+    import os, shlex
+    raw = os.environ.get('MERIDIAN_ARGS') or os.environ.get('JOB_ARGUMENTS')
+    if raw:
+        sys.argv = [sys.argv[0] if sys.argv else 'meridian', *shlex.split(raw)]
+    elif sys.argv and 'ipykernel' in sys.argv[0]:
+        sys.argv = [sys.argv[0]]
+        print('No arguments: set the Job environment variable MERIDIAN_ARGS to this script\'s arguments', file=sys.stderr)
+
+
+_job_arguments()
 from meridian.jobs import Settings, Worker
 
 

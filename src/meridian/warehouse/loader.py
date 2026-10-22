@@ -158,7 +158,8 @@ def verify(agent, private_writer, target, run_id, expected):
 
 
 def load(cfg, public, private, identities, target, staging_uri, private_staging_uri, staging_dir=None,
-         private_staging_dir=None, allow_unauthenticated=False, validate=True, stats=True, log=print):
+         private_staging_dir=None, allow_unauthenticated=False, validate=True, stats=True, log=print,
+         accept_shared_login=False):
     cfg = Config.parse(cfg)
     staging_uri, private_staging_uri = checked_uri(staging_uri), checked_uri(private_staging_uri)
     if staging_uri == private_staging_uri or private_staging_uri.startswith(staging_uri + '/') or staging_uri.startswith(private_staging_uri + '/'):
@@ -177,7 +178,7 @@ def load(cfg, public, private, identities, target, staging_uri, private_staging_
         for role in ('public_writer', 'private_writer', 'agent'):
             if identities.get(role) is None: raise LoadError(f'{role} identity is not configured')
             sessions[role] = Session(identities[role], log)
-        report = inspect(identities, target, run_id, allow_unauthenticated, sessions)
+        report = inspect(identities, target, run_id, allow_unauthenticated, sessions, accept_shared_login)
         for warning in report['warnings']: log(f'WARNING {warning}')
         if not report['ready']: raise LoadError('preflight blockers: ' + '; '.join(report['blockers']))
         public_session, private_session = sessions['public_writer'], sessions['private_writer']
@@ -207,7 +208,7 @@ def load(cfg, public, private, identities, target, staging_uri, private_staging_
         passed = all(c['ok'] for c in checks.values())
         result = dict(generation_run_id=run_id, passed=passed, engine='impala_staged_load', target=vars(target),
                       rows={t: expected[t] for t in PUBLIC_TABLES}, checks=checks, preflight_warnings=report['warnings'],
-                      production_ready=report['production_ready'], completed_at=datetime.utcnow().isoformat(timespec='seconds'))
+                      production_ready=report['production_ready'], shared_login_accepted=accept_shared_login, completed_at=datetime.utcnow().isoformat(timespec='seconds'))
         path = private/'warehouse_load.json'
         path.write_text(json.dumps(dict(result, private_rows={t: expected[t] for t in PRIVATE_TABLES}), indent=2))
         path.chmod(0o600)

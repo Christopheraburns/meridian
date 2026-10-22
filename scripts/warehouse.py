@@ -29,6 +29,20 @@ def _checkout():
 
 
 sys.path.insert(0, str(_checkout()/'src'))
+
+
+def _job_arguments():
+    """Workbench Jobs run in a kernel whose sys.argv holds kernel flags; MERIDIAN_ARGS carries the script's arguments."""
+    import os, shlex
+    raw = os.environ.get('MERIDIAN_ARGS') or os.environ.get('JOB_ARGUMENTS')
+    if raw:
+        sys.argv = [sys.argv[0] if sys.argv else 'meridian', *shlex.split(raw)]
+    elif sys.argv and 'ipykernel' in sys.argv[0]:
+        sys.argv = [sys.argv[0]]
+        print('No arguments: set the Job environment variable MERIDIAN_ARGS to this script\'s arguments', file=sys.stderr)
+
+
+_job_arguments()
 from meridian.config import config_load
 from meridian.warehouse.identity import identities
 from meridian.warehouse.loader import LoadError, load, read_public_run, stage_files
@@ -55,6 +69,8 @@ def main():
     pre = commands.add_parser('preflight', help='Read-only checks; exit 1 on blockers')
     pre.add_argument('--public', help='Public run, to check occupancy against its run ID')
     pre.add_argument('--allow-unauthenticated', action='store_true', help='Local NOSASL development only')
+    shared_help = 'Interim only: let the agent share a writer login; re-run preflight with the real agent login afterwards'
+    pre.add_argument('--accept-shared-login', action='store_true', help=shared_help)
     stage = commands.add_parser('stage', help='Lay out one directory per table under MERIDIAN_(PRIVATE_)STAGING_DIR')
     run = commands.add_parser('load', help='Validate, stage if configured, commit and verify one run')
     for command in (stage, run):
@@ -64,12 +80,13 @@ def main():
     run.add_argument('--allow-unauthenticated', action='store_true', help='Local NOSASL development only')
     run.add_argument('--skip-public-validation', action='store_true', help='Only when this exact run already passed validation')
     run.add_argument('--no-stats', action='store_true')
+    run.add_argument('--accept-shared-login', action='store_true', help=shared_help)
     args = parser.parse_args()
     target = Target.environment()
 
     if args.command == 'preflight':
         run_id = read_public_run(args.public)['generation_run_id'] if args.public else '-'
-        report = inspect(identities(), target, run_id, args.allow_unauthenticated)
+        report = inspect(identities(), target, run_id, args.allow_unauthenticated, accept_shared_login=args.accept_shared_login)
         print(json.dumps(report, indent=2))
         return 0 if report['ready'] else 1
     run_id = read_public_run(args.public)['generation_run_id']
@@ -85,7 +102,8 @@ def main():
     try:
         result = load(config_load(args.config), args.public, args.private, identities(), target, *uris, *dirs,
                       allow_unauthenticated=args.allow_unauthenticated, validate=not args.skip_public_validation,
-                      stats=not args.no_stats, log=lambda message: print(f'[m4] {message}', flush=True))
+                      stats=not args.no_stats, log=lambda message: print(f'[m4] {message}', flush=True),
+                      accept_shared_login=args.accept_shared_login)
     except LoadError as exc:
         print(f'[m4] FAIL: {exc}', file=sys.stderr)
         return 1

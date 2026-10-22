@@ -153,3 +153,16 @@ def test_stage_layout_and_public_run_guards(tmp_path):
     manifest = json.loads((public/'public_manifest.json').read_text()); manifest['complete'] = False
     (public/'public_manifest.json').write_text(json.dumps(manifest))
     with pytest.raises(LoadError, match='not complete'): read_public_run(public)
+
+
+def test_shared_login_is_an_explicit_interim_exception():
+    ids = identities(dict(ENV, MERIDIAN_AGENT_USER='gen-public', MERIDIAN_PRIVATE_WRITER_USER='gen-public'))
+    strict = inspect(ids, Target(), sessions=sessions(ids, private_readable=True))
+    assert {b.split(':')[0] for b in strict['blockers']} == {'identity separation', 'agent private isolation'}
+    interim = inspect(ids, Target(), sessions=sessions(ids, private_readable=True), accept_shared_login=True)
+    assert interim['ready'] and not interim['production_ready']
+    assert any(w.startswith('identity separation') and 'accept-shared-login' in w for w in interim['warnings'])
+    assert any(w.startswith('agent private isolation') for w in interim['warnings'])
+    # The flag never excuses schema drift or an occupied target.
+    occupied = inspect(ids, Target(), sessions=sessions(ids, private_readable=True, other_rows=5), accept_shared_login=True)
+    assert [b.split(':')[0] for b in occupied['blockers']] == ['target occupancy']

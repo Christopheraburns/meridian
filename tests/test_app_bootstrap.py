@@ -1,4 +1,5 @@
 """Exercise Workbench-style execution without a script __file__."""
+import json
 from pathlib import Path
 import pytest
 
@@ -56,3 +57,19 @@ def test_entry_points_run_as_workbench_cells(entry,tmp_path,monkeypatch):
     exec(compile((ROOT/entry).read_text(),'<workbench cell>','exec'),namespace)
     assert Path.cwd().resolve()==ROOT
     assert any(Path(p).resolve()==ROOT/'src' for p in __import__('sys').path)
+
+
+def test_job_arguments_replace_kernel_argv(tmp_path,monkeypatch):
+    import sys
+    (tmp_path/'meridian').symlink_to(ROOT,target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr('sys.path',list(sys.path))
+    monkeypatch.setattr('sys.argv',['/usr/local/lib/python3.12/site-packages/ipykernel_launcher.py','-f','/tmp/kernel.json'])
+    out = tmp_path/'run'
+    monkeypatch.setenv('MERIDIAN_ARGS',f"--config config/smoke.yaml --output '{out}/public' --private-output '{out}/private' --rows 600")
+    exec(compile((ROOT/'cli.py').read_text(),'<workbench cell>','exec'),{'__name__':'__main__'})
+    assert json.loads((out/'public/public_manifest.json').read_text())['rows_generated']==600
+    monkeypatch.delenv('MERIDIAN_ARGS')
+    monkeypatch.setattr('sys.argv',['/x/ipykernel_launcher.py','-f','/tmp/kernel.json'])
+    with pytest.raises(SystemExit):
+        exec(compile((ROOT/'scripts/validate_scenario.py').read_text(),'<workbench cell>','exec'),{'__name__':'__main__'})
