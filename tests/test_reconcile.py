@@ -26,3 +26,9 @@ def test_compare_is_exact():
     assert [name for name, passed, _ in off_by_one if not passed] == ['all']
     extra = reconcile.compare(report, [['all', '10', '2', '1500'], ['exposed', '4', '1', '401'], ['bogus', '1', '0', '0']])
     assert ('bogus', False, 'group not produced by the evaluator') in extra
+
+
+def test_compare_accepts_exported_csv_with_header():
+    report = {'groups': {'all': dict(attempts=10, declined=2, mean_latency_ms=150.0)}}
+    hue = [['﻿grp', 'attempts', 'declined', 'latency_sum'], ['all', '10', '2', '1500'], []]
+    assert all(passed for _, passed, _ in reconcile.compare(report, hue))

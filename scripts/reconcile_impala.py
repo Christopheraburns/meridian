@@ -93,7 +93,10 @@ def group_sql(cfg, run_id, database):
 
 def compare(report, rows):
     """Return (name, ok, detail) per group; counts exact, latency to the evaluator's float precision."""
-    found = {r[0]: (int(r[1]), int(r[2]), int(r[3])) for r in rows if r}
+    # impala-shell -B has no header; Hue and other CSV exports add one (and sometimes a BOM).
+    rows = [[cell.strip().lstrip('\ufeff').strip('"') for cell in r] for r in rows if r and any(c.strip() for c in r)]
+    if rows and not rows[0][1].lstrip('-').isdigit(): rows = rows[1:]
+    found = {r[0]: (int(r[1]), int(r[2]), int(r[3])) for r in rows}
     results = []
     for name, want in sorted(report['groups'].items()):
         got = found.pop(name, (0, 0, 0))
