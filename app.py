@@ -134,7 +134,46 @@ def create_app(settings=None):
     return app
 
 
+def listeners(port):
+    """Processes listening on port, from /proc: Workbench Application pods have no ss/lsof."""
+    import glob
+    inodes = set()
+    for table in ('/proc/net/tcp','/proc/net/tcp6'):
+        try:
+            rows = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            fields = row.split()
+            if fields[3]=='0A' and int(fields[1].rsplit(':',1)[1],16)==port: inodes.add(fields[9])
+    found = []
+    for fd in glob.glob('/proc/[0-9]*/fd/*'):
+        try:
+            target = os.readlink(fd)
+            if target.startswith('socket:[') and target[8:-1] in inodes:
+                pid = fd.split('/')[2]
+                found.append(f"pid {pid}: {Path(f'/proc/{pid}/cmdline').read_text().replace(chr(0),' ').strip()}")
+        except OSError:
+            pass
+    if inodes and not found: found.append('a process this user cannot inspect')
+    return found
+
+
+def serve(app):
+    # Workbench proxies to localhost; Docker publishes the container port, so it needs 0.0.0.0.
+    host = os.getenv('GENERATOR_BIND_HOST') or ('127.0.0.1' if os.getenv('CDSW_APP_PORT') else '0.0.0.0')
+    port = int(os.getenv('CDSW_APP_PORT',os.getenv('PORT','8080')))
+    print(f"Meridian control plane on {host}:{port} (CDSW_APP_PORT={os.getenv('CDSW_APP_PORT')}, "
+          f"CDSW_READONLY_PORT={os.getenv('CDSW_READONLY_PORT')}, PORT={os.getenv('PORT')})",flush=True)
+    try:
+        app.run(host=host,port=port)
+    except SystemExit:
+        holders = listeners(port)
+        print(f"Port {port} is held by: {'; '.join(holders) if holders else 'no listener found in /proc'}",flush=True)
+        raise
+
+
 app = create_app()
 
 if __name__=='__main__':
-    app.run(host='0.0.0.0',port=int(os.getenv('CDSW_APP_PORT',os.getenv('PORT','8080'))))
+    serve(app)
