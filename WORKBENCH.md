@@ -6,14 +6,10 @@ The generic Dockerfile remains for Docker Desktop, not a Cloudera runtime image.
 
 Configure these environment variables for both the Application and worker Job:
 
-- GENERATOR_STATE_DIR: persistent restricted directory for SQLite, token, logs and lock.
+- GENERATOR_STATE_DIR: persistent restricted directory for SQLite, logs and lock.
 - GENERATOR_OUTPUT: persistent public Parquet root.
 - GENERATOR_PRIVATE_OUTPUT: separate restricted truth root (worker needs access).
 - GENERATOR_CONFIG: config/smoke.yaml initially, or another approved config file.
-- GENERATOR_API_TOKEN or GENERATOR_API_TOKEN_FILE: operator secret delivered by
-  Workbench secrets/mounted file. Without either, the worker creates operator.token
-  in the registry directory; retrieve it through an authorized operator session.
-- Optional GENERATOR_VIEWER_TOKEN: separate read-only status identity.
 - GENERATOR_PUBLIC_ORIGIN: externally visible application origin when TLS terminates
   at a proxy, for example the actual Workbench application's scheme and hostname.
 

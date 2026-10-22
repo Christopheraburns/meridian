@@ -38,9 +38,7 @@ Application (`app.py`); project root assumed `/home/cdsw`:
 | `GENERATOR_OUTPUT` | `/home/cdsw/data/public` |
 | `GENERATOR_PRIVATE_OUTPUT` | `/home/cdsw/data/private` |
 | `GENERATOR_CONFIG` | `config/smoke.yaml` (the UI refuses 50M; 50M runs from the CLI) |
-| `GENERATOR_API_TOKEN` | random: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
 | `GENERATOR_PUBLIC_ORIGIN` | the application's exact `https://…` URL |
-| `GENERATOR_VIEWER_TOKEN` | optional, random |
 
 Warehouse (project level or the loading Job; not needed by the Application):
 

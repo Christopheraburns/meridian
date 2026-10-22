@@ -31,12 +31,12 @@ physical output batching; --run-id fixes logical run identity for reproducibilit
 docker compose up --build
 ```
 
-Open http://localhost:8081 (container port 8080). Retrieve the operator token with
-`docker compose exec generator cat /state/operator.token`, then connect in the UI.
+Open http://localhost:8081 (container port 8080). The UI has no login; keep it
+behind localhost or Workbench authentication.
 The separate worker executes queued jobs; history survives web/container restarts.
 The default UI configuration is the 10k smoke profile. Public output persists in
 `data/public/<run_id>`; private truth in `data/private/<run_id>` is mounted only in
-the worker. SQLite/token state uses a persistent Docker-managed named volume.
+the worker. SQLite state uses a persistent Docker-managed named volume.
 
 See [M3 jobs and API](docs/m3_jobs.md) for access roles, cancellation, retry,
 preflight and the Docker restart test. Keep private output and registry state

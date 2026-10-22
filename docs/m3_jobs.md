@@ -8,35 +8,30 @@ local CLI and private M2 evaluator remain in use. No warehouse writes occur.
 
 ```bash
 docker compose up --build -d
-# Retrieve the locally generated operator token; do not share it with investigators.
-docker compose exec generator cat /state/operator.token
 ```
 
-Open http://localhost:8081, paste the token and connect. The UI shows readiness,
-operator configuration, recent runs, verified written rows, validation results,
+Open http://localhost:8081. The UI shows readiness, configuration, recent runs, verified written rows, validation results,
 output locations and sanitized lifecycle logs. The default UI config is the 10k
 smoke profile. The existing config/default.yaml is unchanged and remains usable
 through the CLI or GENERATOR_CONFIG.
 
-SQLite, worker lock, operator token and operator-only error diagnostics live in a
+SQLite, worker lock and operator-only error diagnostics live in a
 Docker-managed named volume at `/state`. Use this local volume for locking rather
 than a macOS host bind mount. The web and worker share this volume. Public output
 is `data/public/<run_id>`; private output is `data/private/<run_id>`. Only the worker
 has the private-output mount. Do not use `docker compose down -v` if you want to
-retain registry history/token. Normal stop/start, restart and down/up retain it.
+retain registry history. Normal stop/start, restart and down/up retain it.
 
-Optionally supply GENERATOR_API_TOKEN and GENERATOR_VIEWER_TOKEN from the deployment
-environment. Empty values use the generated operator token and disable viewer
-access. Outside Compose, GENERATOR_API_TOKEN_FILE can reference a mounted secret.
-Tokens are never returned by APIs or persisted in browser storage; the UI keeps
-its token only in page memory. Use TLS and platform access controls when deployed
-beyond localhost. The Compose port binds only to 127.0.0.1.
+The control plane has no login of its own (removed 2026-10-21: it is an internal
+loader that only operators reach). Access control is the platform's: the Compose
+port binds only to 127.0.0.1, and on Workbench the Application must keep
+Workbench authentication on (do not enable unauthenticated access for it).
 
 ## API
 
-All `/api/*` routes require `Authorization: Bearer <token>`; `/health` and the
-login/dashboard HTML shell remain public. Read-only token users may read status,
-logs and readiness. Only operators can view configuration or perform mutations.
+`/api/*` routes need no credentials. Mutations (POST) are refused when the request's
+`Origin` differs from the application's own origin (GENERATOR_PUBLIC_ORIGIN, or the
+request host), so other websites cannot trigger runs through a signed-in browser.
 Public status/logs use explicit field allowlists and omit seed, scenario predicates,
 private paths, truth and raw exception text. Raw worker diagnostics stay in the
 restricted registry directory. No private evaluator is exposed over HTTP. Failed public revalidation invalidates
