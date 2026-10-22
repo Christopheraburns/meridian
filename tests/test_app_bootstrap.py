@@ -39,3 +39,20 @@ def test_missing_project_root_is_actionable(tmp_path,monkeypatch):
     monkeypatch.delenv('GENERATOR_PROJECT_ROOT',raising=False)
     with pytest.raises(RuntimeError,match='GENERATOR_PROJECT_ROOT'):
         execute_app()
+
+
+ENTRY_POINTS = ['cli.py','worker.py','scripts/calibrate_scenario.py','scripts/preflight.py',
+                'scripts/reconcile_impala.py','scripts/validate_scenario.py','scripts/warehouse.py']
+
+
+@pytest.mark.parametrize('entry',ENTRY_POINTS)
+def test_entry_points_run_as_workbench_cells(entry,tmp_path,monkeypatch):
+    # Workbench Jobs start in /home/cdsw with the checkout in a subdirectory, and run scripts without __file__.
+    (tmp_path/'meridian').symlink_to(ROOT,target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv('GENERATOR_PROJECT_ROOT',raising=False)
+    monkeypatch.setattr('sys.path',list(__import__('sys').path))
+    namespace = {'__name__':'workbench_cell'}
+    exec(compile((ROOT/entry).read_text(),'<workbench cell>','exec'),namespace)
+    assert Path.cwd().resolve()==ROOT
+    assert any(Path(p).resolve()==ROOT/'src' for p in __import__('sys').path)
