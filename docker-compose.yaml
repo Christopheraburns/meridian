@@ -5,8 +5,6 @@ services:
       - "127.0.0.1:8081:8080"
     environment: &environment
       GENERATOR_CONFIG: config/smoke.yaml
-      GENERATOR_API_TOKEN: ${GENERATOR_API_TOKEN:-}
-      GENERATOR_VIEWER_TOKEN: ${GENERATOR_VIEWER_TOKEN:-}
       GENERATOR_PUBLIC_ORIGIN: ${GENERATOR_PUBLIC_ORIGIN:-}
       GENERATOR_STATE_DIR: /state
       GENERATOR_OUTPUT: /app/data/public

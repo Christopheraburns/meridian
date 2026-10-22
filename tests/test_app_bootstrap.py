@@ -16,7 +16,6 @@ def execute_app():
 def test_workbench_without_file(location,tmp_path,monkeypatch):
     monkeypatch.delenv('GENERATOR_PROJECT_ROOT',raising=False)
     monkeypatch.delenv('GENERATOR_CONFIG',raising=False)
-    monkeypatch.setenv('GENERATOR_API_TOKEN','bootstrap-test-token')
     monkeypatch.setenv('GENERATOR_STATE_DIR',str(tmp_path/'state'))
     monkeypatch.setenv('GENERATOR_OUTPUT',str(tmp_path/'public'))
     monkeypatch.setenv('GENERATOR_PRIVATE_OUTPUT',str(tmp_path/'private'))
@@ -30,7 +29,7 @@ def test_workbench_without_file(location,tmp_path,monkeypatch):
     client=loaded['app'].test_client()
     assert client.get('/health').json=={'ok':True}
     assert client.get('/').status_code==200
-    response=client.get('/api/config/schema',headers={'Authorization':'Bearer bootstrap-test-token'})
+    response=client.get('/api/config/schema')
     assert response.status_code==200
     assert response.json['default_config']['scale']['transaction_rows']==10000
 

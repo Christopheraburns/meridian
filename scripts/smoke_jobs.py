@@ -8,22 +8,20 @@ from pathlib import Path
 import subprocess
 import time
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
-import uuid
+from urllib.error import URLError
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ['docker','compose','-p','meridian-m3-smoke','-f','docker-compose.yaml','-f','tests/docker-compose.smoke.yaml']
 BASE = 'http://localhost:8081'
-ENV = dict(os.environ,GENERATOR_API_TOKEN=uuid.uuid4().hex,GENERATOR_VIEWER_TOKEN='',GENERATOR_PUBLIC_ORIGIN=BASE)
+ENV = dict(os.environ,GENERATOR_PUBLIC_ORIGIN=BASE)
 
 
 def compose(*args):
     subprocess.run(COMPOSE+list(args),cwd=ROOT,env=ENV,check=True)
 
 
-def api(path, method='GET', data=None, authenticated=True):
+def api(path, method='GET', data=None):
     headers={'Content-Type':'application/json'}
-    if authenticated: headers['Authorization']='Bearer '+ENV['GENERATOR_API_TOKEN']
     req=Request(BASE+path,headers=headers,method=method,data=json.dumps(data).encode() if data is not None else None)
     with urlopen(req,timeout=30) as response:
         raw=response.read()
@@ -53,17 +51,14 @@ def submit(rows=10000,batch=500):
 def main():
     try:
         compose('up','--build','-d')
-        wait_for(lambda:api('/health',authenticated=False)['ok'],'health')
-        assert 'Meridian Financial Generator' in api('/',authenticated=False)
-        try: api('/api/runs',authenticated=False)
-        except HTTPError as exc: assert exc.code==401
-        else: raise AssertionError('Unauthenticated API access was allowed')
+        wait_for(lambda:api('/health')['ok'],'health')
+        assert 'Meridian Financial Generator' in api('/')
         wait_for(lambda:api('/api/preflight')['local_parquet']['ready'],'worker readiness')
         run_id=submit()
         result=wait_for(lambda:status(run_id) if status(run_id)['status']=='complete' else None,'10k run')
         assert result['rows_written']==10000
         compose('restart','generator','worker')
-        wait_for(lambda:api('/health',authenticated=False)['ok'],'restart health')
+        wait_for(lambda:api('/health')['ok'],'restart health')
         assert status(run_id)['status']=='complete'
         api('/api/runs/'+run_id+'/validate','POST',{})
         wait_for(lambda:status(run_id)['validation_status']=='passed','public validation')

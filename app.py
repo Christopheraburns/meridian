@@ -30,7 +30,6 @@ from werkzeug.exceptions import BadRequest
 from meridian.config import Config, config_load
 from meridian.jobs import Settings
 from meridian.registry import Registry, Conflict, public_run
-from meridian.security import identity
 from meridian.preflight import inspect
 
 
@@ -43,13 +42,10 @@ def create_app(settings=None):
     def registry(): return Registry(settings.state)
 
     @app.before_request
-    def authorize():
-        if not request.path.startswith('/api/'): return None
-        role = identity(request.headers.get('Authorization',''),settings.state)
-        if role is None: return jsonify(error='Bearer token required'),401
-        operator_only = request.method!='GET' or request.path.startswith('/api/config')
-        if operator_only and role!='operator': return jsonify(error='Operator access required'),403
-        if request.method!='GET' and request.headers.get('Origin'):
+    def same_origin():
+        # No application login: Workbench authentication fronts the UI. Still refuse cross-site changes.
+        if not request.path.startswith('/api/') or request.method=='GET': return None
+        if request.headers.get('Origin'):
             if request.headers['Origin'].rstrip('/') != (os.getenv('GENERATOR_PUBLIC_ORIGIN') or request.host_url).rstrip('/'):
                 return jsonify(error='Cross-origin changes are not allowed'),403
 

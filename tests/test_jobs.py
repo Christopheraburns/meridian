@@ -19,8 +19,6 @@ def config(): return replace(Config.parse(config_load('config/smoke.yaml')),rows
 
 @pytest.fixture
 def settings(tmp_path,monkeypatch):
-    monkeypatch.setenv('GENERATOR_API_TOKEN','operator-test-token')
-    monkeypatch.setenv('GENERATOR_VIEWER_TOKEN','viewer-test-token')
     return Settings(tmp_path/'state',tmp_path/'public',tmp_path/'private',Path('config/smoke.yaml').resolve())
 
 
@@ -30,41 +28,35 @@ def client(settings):
     return module.create_app(settings).test_client()
 
 
-OP = {'Authorization':'Bearer operator-test-token'}
-VIEW = {'Authorization':'Bearer viewer-test-token'}
-
-
 def test_durable_api_lifecycle_and_privacy(settings):
     web = client(settings)
     assert web.get('/health').status_code == 200
     assert web.get('/').status_code == 200
-    assert web.get('/api/runs').status_code == 401
-    assert web.get('/api/config/schema',headers=VIEW).status_code == 403
-    assert web.post('/api/runs',headers=VIEW,json={}).status_code == 403
+    assert web.get('/api/runs').status_code == 200
     cfg = asdict(config())
-    result = web.post('/api/runs',headers=OP,json={'config':cfg})
+    result = web.post('/api/runs',json={'config':cfg})
     assert result.status_code == 202
     run_id = result.json['run_id']
     # New Flask instance sees the same queue; web process never launches a thread.
     restarted = client(settings)
-    assert restarted.get('/api/runs/'+run_id,headers=VIEW).json['status']=='queued'
+    assert restarted.get('/api/runs/'+run_id).json['status']=='queued'
     Worker(settings).run(once=True)
-    result = restarted.get('/api/runs/'+run_id,headers=VIEW).json
+    result = restarted.get('/api/runs/'+run_id).json
     assert result['status']=='complete' and result['rows_written']==1200
     assert result['logs'][-1]['message']=='Run complete'
     body = json.dumps(result)
-    for secret in ('scenario','faulty','predicate','exposed','counterfactual','config_json','operator-test-token'):
+    for secret in ('scenario','faulty','predicate','exposed','counterfactual','config_json'):
         assert secret not in body
-    assert web.get('/api/config/schema',headers=OP).json['engine']=='local_parquet'
-    assert web.post('/api/runs/'+run_id+'/validate',headers=OP).status_code==202
-    assert web.post('/api/runs/'+run_id+'/validate',headers=OP).status_code==409
+    assert web.get('/api/config/schema').json['engine']=='local_parquet'
+    assert web.post('/api/runs/'+run_id+'/validate').status_code==202
+    assert web.post('/api/runs/'+run_id+'/validate').status_code==409
     Worker(settings).run(once=True)
-    detail = web.get('/api/runs/'+run_id,headers=VIEW).json
+    detail = web.get('/api/runs/'+run_id).json
     assert detail['validation']['passed'] and detail['validation']['rows']==1200
-    assert web.post('/api/runs/'+run_id+'/cancel',headers=OP).status_code==409
-    assert web.post('/api/runs/'+run_id+'/retry',headers=OP).status_code==409
-    assert web.get('/api/runs/not-a-run',headers=OP).status_code==404
-    assert web.get('/api/preflight',headers=OP).json['spark_iceberg']['ready'] is False
+    assert web.post('/api/runs/'+run_id+'/cancel').status_code==409
+    assert web.post('/api/runs/'+run_id+'/retry').status_code==409
+    assert web.get('/api/runs/not-a-run').status_code==404
+    assert web.get('/api/preflight').json['spark_iceberg']['ready'] is False
 
 
 def test_cancel_during_generation_retry_without_replay(settings,monkeypatch):
@@ -95,13 +87,13 @@ def test_queued_cancel_validation_and_request_errors(settings):
     run_id = reg.submit(config()); reg.cancel(run_id)
     Worker(settings).run(once=True)
     assert reg.get(run_id)['status']=='cancelled' and not (settings.public/run_id).exists()
-    assert web.post('/api/runs/'+run_id+'/validate',headers=OP).status_code==409
-    assert web.post('/api/runs',headers=OP,json={'config':{'rows':0}}).status_code==400
-    assert web.post('/api/runs',headers=OP,json=[]).status_code==400
-    assert web.post('/api/runs',headers={**OP,'Origin':'https://untrusted.example'},json={}).status_code==403
+    assert web.post('/api/runs/'+run_id+'/validate').status_code==409
+    assert web.post('/api/runs',json={'config':{'rows':0}}).status_code==400
+    assert web.post('/api/runs',json=[]).status_code==400
+    assert web.post('/api/runs',headers={'Origin':'https://untrusted.example'},json={}).status_code==403
     huge = asdict(replace(config(),rows=50000000))
-    assert web.post('/api/runs',headers=OP,json={'config':huge}).status_code==400
-    retry = web.post('/api/runs/'+run_id+'/retry',headers=OP)
+    assert web.post('/api/runs',json={'config':huge}).status_code==400
+    retry = web.post('/api/runs/'+run_id+'/retry')
     assert retry.status_code==202 and retry.json['parent_run_id']==run_id
 
 
@@ -189,14 +181,3 @@ def test_recovery_invalidates_corrupt_manifest_without_replay(settings):
     manifest=json.loads((root/'public_manifest.json').read_text())
     assert not manifest['complete'] and manifest['rows_generated']==1200
     assert manifest['requested_rows']==1200
-
-
-def test_generated_operator_token_is_stable_and_restricted(settings,monkeypatch):
-    from meridian.security import operator_token, identity
-    monkeypatch.delenv('GENERATOR_API_TOKEN')
-    monkeypatch.delenv('GENERATOR_API_TOKEN_FILE',raising=False)
-    first=operator_token(settings.state)
-    assert len(first)>=32 and operator_token(settings.state)==first
-    assert (settings.state/'operator.token').stat().st_mode & 0o777==0o600
-    assert identity('Bearer '+first,settings.state)=='operator'
-    assert identity('Bearer wrong-token',settings.state) is None

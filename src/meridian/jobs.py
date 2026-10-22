@@ -88,8 +88,6 @@ class Worker:
         settings.validate()
         self.settings = settings
         self.registry = Registry(settings.state)
-        from .security import operator_token
-        operator_token(settings.state)
         settings.private.mkdir(parents=True,exist_ok=True,mode=0o700)
         settings.private.chmod(0o700)
         self.stopping = False
